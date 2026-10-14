@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}AI Insights{% endblock %}
+{% block content %}
+<h1>AI Insights</h1>
+<div class="disclaimer">These insights come from a transparent <b>rules engine</b> (no black box). They are educational prompts, not buy/sell commands, and they never predict prices or promise profit. Open "Why did this appear?" on any card to see the rule, inputs and assumptions.</div>
+<div class="card"><div id="list" class="spinner">Loading...</div></div>
+<div class="card"><h2>Rules checked</h2><ul class="small">
+  <li>Holdings without a price (missing data)</li><li>A single holding above your concentration threshold (<span id="thr"></span>%)</li>
+  <li>One asset class above 70% of value</li><li>Fewer than 4 holdings or fewer than 3 categories</li>
+  <li>Short time horizon (3 years or less) combined with a high-volatility mix</li><li>Portfolio volatility rating far from your questionnaire score</li>
+  <li>Very high cash with a long horizon, or very low cash with a volatile mix</li><li>Holdings down 20% or more from cost</li><li>Stale sample data</li></ul></div>
+{% endblock %}
+{% block scripts %}
+<script>
+api('/api/insights').then(d => { $('#list').className = ''; $('#list').innerHTML = d.insights.map(insightHTML).join(''); $('#thr').textContent = d.threshold; }).catch(e => toast(e.message, 'bad'));
+</script>
+{% endblock %}

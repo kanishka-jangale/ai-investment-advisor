@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Report{% endblock %}
+{% block content %}
+<div class="row noprint" style="align-items:center"><h1>Reports &amp; Export</h1>
+  <div class="auto"><button class="btn" onclick="window.print()">Print / Save as PDF</button></div>
+  <div class="auto"><a class="btn ghost" href="/export/holdings.csv">Download holdings CSV</a></div></div>
+<div class="card">
+  <h2 style="font-size:1.3rem">Portfolio Summary Report</h2>
+  <div class="small muted">Generated {{ today }} &middot; Prepared for: {{ prof.display_name or user.username }} &middot; Currency: {{ cur }} (display only)</div>
+  <div class="small mt"><b>Data sources:</b> {{ 'Sample portfolio (demo)' if user.is_demo else 'Manually entered holdings' }}; prices from manual entry or the simulated sample dataset
+    (<b>{{ status.label }}</b>, last date {{ status.last_updated }}). No live market data is used.</div>
+</div>
+<div class="card"><h2>1. Summary</h2>
+  <table><tbody>
+    <tr><th>Total portfolio value</th><td class="num">{{ st.summary.value|money(cur) }}</td><th>Invested (cost basis)</th><td class="num">{{ st.summary.cost|money(cur) }}</td></tr>
+    <tr><th>Unrealized profit / loss</th><td class="num">{{ st.summary.pl|money(cur) }}</td><th>Overall return</th><td class="num">{{ st.summary.ret|pct }}</td></tr>
+    <tr><th>Holdings</th><td class="num">{{ st.summary.count }} ({{ st.summary.missing }} without a price)</td><th>Portfolio volatility rating</th><td class="num">{{ st.alloc.risk_exposure }}/100</td></tr></tbody></table></div>
+<div class="card"><h2>2. Holdings</h2><div class="tablewrap"><table><thead><tr><th>Asset</th><th>Category</th><th class="num">Qty</th><th class="num">Buy price</th><th class="num">Latest</th><th>Price source</th><th class="num">Value</th><th class="num">P/L</th><th class="num">Return</th><th class="num">Weight</th></tr></thead><tbody>
+  {% for h in st.enriched %}<tr><td>{{ h.name }}</td><td>{{ h.category }}</td><td class="num">{{ h.quantity }}</td><td class="num">{{ h.buy_price|money(cur) }}</td><td class="num">{{ h.price|money(cur) }}</td><td>{{ h.price_source }}</td>
+    <td class="num">{{ h.value|money(cur) }}</td><td class="num">{{ h.pl|money(cur) }}</td><td class="num">{{ h.ret|pct }}</td><td class="num">{{ ('%.1f%%' % h.weight) if h.weight is not none else '-' }}</td></tr>
+  {% else %}<tr><td colspan="10">No holdings.</td></tr>{% endfor %}</tbody></table></div></div>
+<div class="card"><h2>3. Allocation by category</h2>
+  {% for c in st.alloc.by_category %}<div class="row" style="align-items:center;margin-bottom:.3rem"><div style="flex:0 0 120px">{{ c.category }}</div><div><div class="bar"><i style="width:{{ c.weight }}%"></i></div></div><div class="auto small">{{ '%.1f' % c.weight }}% &middot; {{ c.value|money(cur) }}</div></div>
+  {% else %}<span class="muted">Nothing to show.</span>{% endfor %}</div>
+<div class="card"><h2>4. Performance (monthly, {{ perf.range if perf.available else '' }})</h2>
+  {% if perf.available %}<p>Change over period: <b>{{ perf.abs_change|money(cur) }} ({{ perf.pct_change|pct }})</b>. {{ perf.assumption }}</p>
+  <div class="tablewrap"><table><thead><tr><th>Date</th><th class="num">Value</th><th class="num">% change</th></tr></thead><tbody>
+  {% for r in perf.table[:12] %}<tr><td>{{ r.date }}</td><td class="num">{{ r.value|money(cur) }}</td><td class="num">{{ r.change|pct }}</td></tr>{% endfor %}</tbody></table></div>
+  {% else %}<p class="muted">{{ perf.reason }}</p>{% endif %}</div>
+<div class="card"><h2>5. Risk profile</h2>
+  {% if st.risk %}<p><b>{{ st.risk.category }}</b> (score {{ st.risk.score }}/100; ability {{ st.risk.ability }}, willingness {{ st.risk.willingness }}).</p><p class="small">{{ st.risk.notes|join(' ') }}</p>
+  {% else %}<p class="muted">Risk questionnaire not completed.</p>{% endif %}</div>
+<div class="card"><h2>6. Insights</h2>
+  {% for i in insights %}<div style="margin-bottom:.6rem"><b>[{{ i.severity|upper }}] {{ i.title }}</b><div class="small">{{ i.message }}</div><div class="small muted">Rule: {{ i.why }} Inputs: {{ i.inputs|join('; ') }}.{% if i.assumptions %} Assumptions: {{ i.assumptions }}{% endif %}</div></div>{% endfor %}</div>
+<div class="card"><h2>7. Assumptions &amp; disclaimer</h2><ul class="small">
+  <li>Value = quantity x latest price; P/L = value - cost basis, before fees and taxes.</li><li>Historical charts assume today's quantities were held for the whole period and use simulated prices.</li>
+  <li>Concentration threshold: {{ prof.conc_threshold|round|int }}% of portfolio value.</li><li>Risk category is an educational estimate from a short questionnaire.</li></ul>
+  <div class="disclaimer" style="margin-bottom:0">This report is educational. It is not investment advice, a recommendation to buy or sell, or a guarantee of returns. Past performance does not predict future results. Sample data is simulated.</div></div>
+{% endblock %}

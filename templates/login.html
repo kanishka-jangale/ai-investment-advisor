@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Welcome | AI Investment Advisor Dashboard</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="auth"><div class="box">
+  <div class="card">
+    <h1>AI Investment Advisor</h1>
+    <p class="muted">A decision-support prototype that helps beginners understand a portfolio. It is <b>not</b> a broker, does not guarantee returns, and is not a substitute for a qualified financial adviser.</p>
+    <h2 class="mt">Try the demo (no sign-up)</h2>
+    <p class="small muted">Pick a sample investor. Each demo session is private and can be reset. Prices are simulated sample data.</p>
+    {% for key, p in personas.items() %}
+      <a class="persona" href="{{ url_for('demo', profile=key) }}"><b>{{ p.label }}</b><br><span class="small muted">{{ p.goal }} &middot; {{ p.horizon_years }}-year horizon</span></a>
+    {% endfor %}
+  </div>
+  <div class="card">
+    {% if mode == 'register' %}
+      <h2>Create an account</h2>
+      <form method="post" action="{{ url_for('register') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="field"><label>Username</label><input name="username" required minlength="3" maxlength="30" autocomplete="username"></div>
+        <div class="field"><label>Password (min 8 characters)</label><input type="password" name="password" required minlength="8" autocomplete="new-password"></div>
+        <div class="field"><label>Confirm password</label><input type="password" name="password2" required minlength="8" autocomplete="new-password"></div>
+        {% if error %}<div class="err neg small">{{ error }}</div>{% endif %}
+        <button class="btn" type="submit">Create account</button>
+        <p class="small muted mt">Only a username and a hashed password are stored. Never enter bank or broker credentials in this app. <a href="{{ url_for('login') }}">Back to sign in</a></p>
+      </form>
+    {% else %}
+      <h2>Sign in</h2>
+      <form method="post" action="{{ url_for('login') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="field"><label>Username</label><input name="username" required autocomplete="username"></div>
+        <div class="field"><label>Password</label><input type="password" name="password" required autocomplete="current-password"></div>
+        {% if error %}<div class="err neg small">{{ error }}</div>{% endif %}
+        <button class="btn" type="submit">Sign in</button>
+        <p class="small muted mt">No account? <a href="{{ url_for('register') }}">Create one</a> to save your profile and holdings.</p>
+      </form>
+    {% endif %}
+  </div>
+</div></div>
+</body>
+</html>

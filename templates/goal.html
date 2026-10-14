@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Goal Planner{% endblock %}
+{% block content %}
+<h1>Goal Planner / SIP Calculator</h1>
+<div class="disclaimer">Results are <b>illustrations, not promises or personalised advice</b>. Real returns change from year to year and can be negative. Inflation, taxes, fees and changing contributions are not modelled.</div>
+<div class="grid g21">
+  <div class="card"><h2>Inputs</h2>
+    <form id="gform" novalidate><div class="row">
+      <div class="field"><label>Target amount</label><input name="target" type="number" step="any" value="1000000"><div class="err" data-err="target"></div></div>
+      <div class="field"><label>Time horizon (years)</label><input name="years" type="number" step="0.5" value="10"><div class="err" data-err="years"></div></div></div>
+      <div class="row"><div class="field"><label>Assumed yearly return (%)<span class="tip" tabindex="0" data-tip="A guess, not a forecast. The table below shows several nearby rates so you can see how sensitive the result is.">?</span></label><input name="rate" type="number" step="0.5" value="12"><div class="err" data-err="rate"></div></div>
+      <div class="field"><label>Already saved (optional)</label><input name="current" type="number" step="any" value="0"></div></div>
+      <div class="field"><label>Payment timing</label><select name="timing"><option value="start">Start of each month</option><option value="end">End of each month</option></select></div>
+      <button class="btn" type="submit">Calculate</button>
+      <p class="small muted mt" id="gmsg"></p></form></div>
+  <div class="card"><h2>How it works</h2><div class="small" id="formula">Enter your numbers and press Calculate. The formula and assumptions will appear here.</div></div>
+</div>
+<div class="card hidden" id="out"><h2>Monthly SIP needed at different assumed returns</h2>
+  <div class="tablewrap"><table><thead><tr><th>Assumed return</th><th class="num">Monthly SIP</th><th class="num">Total you invest</th><th class="num">Growth needed from returns</th></tr></thead><tbody id="srows"></tbody></table></div>
+  <div class="chart-box mt"><canvas id="gChart"></canvas></div>
+  <div class="row mt"><div><input id="gname" placeholder="Name this scenario" maxlength="60"></div><div class="auto"><button class="btn ghost" id="gsave">Save scenario</button></div></div>
+  <ul class="small" id="assump"></ul></div>
+{% endblock %}
+{% block scripts %}
+<script>
+let lastBody = null;
+$('#gform').addEventListener('submit', async e => {
+  e.preventDefault(); const f = e.target; const body = Object.fromEntries(new FormData(f));
+  try {
+    const r = await api('/api/goal', { method: 'POST', body }); setFieldErrors(f, {}); $('#gmsg').textContent = ''; lastBody = body;
+    $('#out').classList.remove('hidden');
+    $('#srows').innerHTML = r.scenarios.map(s => `<tr style="${s.base ? 'background:var(--brand2);font-weight:600' : ''}"><td>${s.rate}% ${s.base ? '(your assumption)' : ''}</td><td class="num">${money(s.monthly)}</td><td class="num">${money(s.invested)}</td><td class="num">${money(s.gain)}</td></tr>`).join('');
+    drawChart('gChart', { type: 'line', data: { labels: r.labels, datasets: [{ label: 'Projected balance at your assumed return (illustration)', data: r.path, borderColor: PALETTE[0], backgroundColor: 'rgba(79,70,229,.12)', fill: true, tension: .2 }] },
+      options: Object.assign(lineOpts('Illustrative growth toward the target', 'Balance'), { elements: { point: { radius: 2 }, line: { borderWidth: 2 } } }) });
+    $('#assump').innerHTML = r.assumptions.map(a => `<li>${esc(a)}</li>`).join('');
+    $('#formula').innerHTML = `<p><b>Formula</b></p><code style="font-size:.78rem;white-space:normal">${esc(r.formula)}</code><p>Months used: ${r.months}.</p><ul>${r.assumptions.map(a => `<li>${esc(a)}</li>`).join('')}</ul>`;
+  } catch (er) { $('#gmsg').innerHTML = `<span class="neg">${esc(er.message)}</span>`; }
+});
+$('#gsave').onclick = async () => { try { await api('/api/scenarios', { method: 'POST', body: { name: $('#gname').value, kind: 'goal', data: lastBody } }); toast('Scenario saved', 'good'); } catch (e) { toast(e.message, 'bad'); } };
+</script>
+{% endblock %}

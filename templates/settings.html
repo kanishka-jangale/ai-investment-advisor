@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Settings / Help{% endblock %}
+{% block content %}
+<h1>Settings / Help</h1>
+<div class="tabs"><button class="on" data-tab="set">Settings &amp; data</button><button data-tab="help">Help &amp; glossary</button></div>
+<div id="tab-set">
+  <div class="grid g2">
+    <div class="card"><h2>Preferences</h2>
+      <form id="sform" novalidate>
+        <div class="field"><label>Currency (display only, no conversion)</label><select name="currency" id="currency"></select></div>
+        <div class="field"><label>Default date range</label><select name="default_range" id="drange"></select></div>
+        <div class="field"><label>Concentration threshold (% of portfolio)<span class="tip" tabindex="0" data-tip="A single holding above this share is flagged. You can change it.">?</span></label><input name="conc_threshold" type="number" step="1" min="5" max="100"></div>
+        <button class="btn" type="submit">Save settings</button> <span class="small" id="smsg"></span></form></div>
+    <div class="card"><h2>Data source status</h2><div id="status" class="small"></div></div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h2>Your data</h2>
+      <div class="row"><div class="auto"><a class="btn ghost" href="/api/export/all">Download all my data (JSON)</a></div><div class="auto"><a class="btn ghost" href="/export/holdings.csv">Holdings CSV</a></div></div>
+      <div class="row mt"><div class="auto"><button class="btn ghost" id="clrSc">Clear saved scenarios</button></div><div class="auto"><button class="btn ghost hidden" id="resetDemo">Reset demo data</button></div></div></div>
+    <div class="card"><h2>Privacy &amp; account</h2><div class="small">
+      <p>The app stores only what you type: a username and password hash (if you register), profile answers, holdings, scenarios, watchlist and reminders, in a local SQLite file. Sessions use a signed cookie. Never enter bank, broker or ID details.</p></div>
+      <div id="delBox"></div></div>
+  </div>
+</div>
+<div id="tab-help" class="hidden">
+  <div class="disclaimer">Everything in this app is <b>educational material</b>, not individualised financial advice. It is not a licensed adviser, broker or trading system, and it never guarantees returns.</div>
+  <div class="grid g2">
+    <div class="card"><h2>Glossary</h2><dl class="small" id="gloss"></dl></div>
+    <div>
+      <div class="card"><h2>How the calculations work</h2><ul class="small">
+        <li><b>Current value</b> = quantity x latest price</li><li><b>Cost basis</b> = quantity x purchase price</li>
+        <li><b>Unrealized P/L</b> = current value - cost basis (before fees and taxes)</li><li><b>Return %</b> = P/L / cost basis x 100 (cost basis must be above 0)</li>
+        <li><b>Weight %</b> = holding value / total portfolio value x 100</li><li><b>Period return %</b> = (ending value - starting value) / starting value x 100</li>
+        <li><b>Volatility</b> = standard deviation of daily returns x sqrt(252)</li><li><b>Max drawdown</b> = largest fall from a previous peak</li>
+        <li><b>SIP</b> = target / [((1+i)^n - 1) / i x (1+i)], i = annual rate / 12, n = months (payments at start of month)</li>
+        <li><b>Risk score</b> = average of 8 factors (each 1-5 points scaled to 0-100). Under 35 Conservative, 35 to 65 Moderate, 65 and above Aggressive.</li></ul></div>
+      <div class="card"><h2>Sample walkthrough</h2><ol class="small">
+        <li>Open the demo and choose a sample investor.</li><li>Complete the Risk Profile questionnaire and read the explanation.</li>
+        <li>Open My Portfolio and inspect value, allocation and performance.</li><li>Add or edit a holding and watch the totals recalculate.</li>
+        <li>Open AI Insights and expand "Why did this appear?" on each card.</li><li>Compare two hypothetical allocations, or try the Goal Planner.</li>
+        <li>Open Reports, print or save as PDF, and note the data sources and assumptions.</li></ol></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const GLOSS = [['Return', 'The gain or loss on an investment, usually shown as a percentage of the amount invested.'],
+ ['Volatility', 'How much and how quickly a price moves up and down. Higher volatility means a wider range of outcomes.'],
+ ['Diversification', 'Spreading money across different assets so that one poor performer matters less. It can reduce concentration risk but cannot remove market risk.'],
+ ['Asset allocation', 'How your money is split between asset classes such as equity, debt, gold and cash.'],
+ ['Liquidity', 'How easily and quickly an asset can be converted to cash without a large loss in value.'],
+ ['SIP', 'Systematic Investment Plan: investing a fixed amount at regular intervals, usually monthly.'],
+ ['Benchmark', 'A reference index used to judge whether a portfolio did better or worse than a broad market measure.'],
+ ['Drawdown', 'The fall from a peak value to a later low. Maximum drawdown is the worst such fall in a period.'],
+ ['Cost basis', 'The total amount paid for an investment, used to work out profit or loss.'],
+ ['Expense ratio', 'A yearly fee charged by a fund as a percentage of the money invested.']];
+$('#gloss').innerHTML = GLOSS.map(g => `<dt style="font-weight:700;margin-top:.5rem">${g[0]}</dt><dd style="margin:0">${g[1]}</dd>`).join('');
+$$('.tabs button').forEach(b => b.onclick = () => { $$('.tabs button').forEach(x => x.classList.remove('on')); b.classList.add('on');
+  $('#tab-set').classList.toggle('hidden', b.dataset.tab !== 'set'); $('#tab-help').classList.toggle('hidden', b.dataset.tab !== 'help'); });
+async function load() {
+  const d = await api('/api/settings'); const f = $('#sform');
+  f.currency.innerHTML = d.currencies.map(c => `<option ${c === d.currency ? 'selected' : ''}>${c}</option>`).join('');
+  f.default_range.innerHTML = d.ranges.map(c => `<option ${c === d.default_range ? 'selected' : ''}>${c}</option>`).join('');
+  f.conc_threshold.value = d.conc_threshold;
+  const s = d.status;
+  $('#status').innerHTML = `<p><b>Source:</b> ${esc(s.source)}</p><p><b>Live feed:</b> ${s.is_live ? 'yes' : 'No - not connected'}</p><p><b>Last data date:</b> ${esc(s.last_updated)} (${s.days_old} day(s) ago)</p>
+    <p><b>Coverage:</b> ${s.symbols} symbols, ${s.rows} rows, ${esc(s.first_date)} to ${esc(s.last_updated)}</p><span class="badge">${esc(s.label)}</span>
+    <p class="muted mt">To use your own historical data, replace <code>data/price_history.csv</code> (first column "date", one column per symbol) and keep its licence and terms of use in mind.</p>`;
+  if (d.is_demo) { $('#resetDemo').classList.remove('hidden'); $('#delBox').innerHTML = '<button class="btn danger sm" id="delDemo">End demo and delete its data</button>'; $('#delDemo').onclick = delAcc; }
+  else $('#delBox').innerHTML = `<div class="field mt"><label>Delete my account (permanent). Enter your password to confirm.</label><input type="password" id="delpw" autocomplete="current-password"></div><button class="btn danger sm" id="delAcc">Delete account and all data</button><div class="small neg mt" id="dmsg"></div>`, $('#delAcc').onclick = delAcc;
+}
+async function delAcc() {
+  if (!confirm('This permanently deletes your data. Continue?')) return;
+  try { await api('/api/account/delete', { method: 'POST', body: { password: ($('#delpw') || {}).value || '' } }); location.href = '/login'; }
+  catch (e) { const m = $('#dmsg'); if (m) m.textContent = e.message; else toast(e.message, 'bad'); }
+}
+$('#sform').addEventListener('submit', async e => { e.preventDefault();
+  try { await api('/api/settings', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); $('#smsg').textContent = 'Saved. Reloading...'; setTimeout(() => location.reload(), 500); }
+  catch (er) { $('#smsg').innerHTML = `<span class="neg">${esc(er.message)}</span>`; } });
+$('#clrSc').onclick = async () => { await api('/api/scenarios/clear', { method: 'POST' }); toast('Scenarios cleared', 'good'); };
+$('#resetDemo').onclick = async () => { if (!confirm('Reset the demo portfolio and profile to the original sample?')) return; await api('/api/demo/reset', { method: 'POST' }); toast('Demo reset', 'good'); };
+load().catch(e => toast(e.message, 'bad'));
+</script>
+{% endblock %}

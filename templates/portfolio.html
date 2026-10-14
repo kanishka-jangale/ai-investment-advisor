@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}My Portfolio{% endblock %}
+{% block content %}
+<h1>My Portfolio</h1>
+<p class="muted small">Add holdings by hand or import a CSV. Values update instantly. Prices come from your manual entry or the simulated sample dataset.</p>
+<div class="card">
+  <div class="row" style="align-items:center">
+    <h2 style="margin:0">Holdings</h2>
+    <div class="auto"><button class="btn" id="addBtn">+ Add holding</button></div>
+    <div class="auto"><button class="btn ghost" id="importBtn">Import CSV</button></div>
+    <div class="auto"><a class="btn ghost" href="/export/holdings.csv">Download CSV</a></div>
+    <div class="auto"><button class="btn ghost" id="sampleBtn">Load sample portfolio</button></div>
+  </div>
+  <div class="tablewrap mt"><table>
+    <thead><tr><th>Asset</th><th>Category</th><th class="num">Qty</th><th class="num">Buy price</th><th class="num">Latest price</th>
+      <th class="num">Cost basis</th><th class="num">Current value</th><th class="num">P/L</th><th class="num">Return</th><th class="num">Weight</th><th></th></tr></thead>
+    <tbody id="rows"><tr><td colspan="11" class="spinner">Loading...</td></tr></tbody>
+    <tfoot id="foot"></tfoot>
+  </table></div>
+  <div class="note">Current value = quantity x latest price. P/L = current value - cost basis (before fees and taxes). Holdings without a price are left out of totals and flagged. Price source: <b>manual</b> (you typed it), <b>sample dataset</b> (simulated), or <b>missing</b>.</div>
+</div>
+
+<div class="grid g2">
+  <div class="card"><h2>Allocation by category</h2><div class="chart-box sm"><canvas id="catChart"></canvas></div></div>
+  <div class="card"><h2>Allocation by holding</h2>
+    <div class="small muted">Concentration threshold: <b id="thr"></b>% (change it in Settings). Holdings above it are highlighted.</div>
+    <div id="byHolding" class="mt"></div></div>
+</div>
+
+<div class="card">
+  <h2>Compare with a hypothetical allocation</h2>
+  <p class="small muted">Type the category split you want to explore (must add up to 100%). This is a what-if tool, not a recommendation.</p>
+  <div class="row" id="targetInputs"></div>
+  <div class="row mt"><div class="auto"><button class="btn" id="cmpBtn">Compare</button></div><div class="small" id="cmpMsg"></div></div>
+  <div class="chart-box sm mt hidden" id="cmpBox"><canvas id="cmpChart"></canvas></div>
+  <div id="cmpNote" class="note hidden"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let CATS = [], CATALOG = {}, DATA = null;
+const src = { manual: 'blue', 'sample dataset': 'gray', missing: 'red' };
+
+async function load() {
+  const d = await api('/api/holdings'); DATA = d; CATS = d.categories; CATALOG = d.catalog;
+  $('#thr').textContent = d.threshold;
+  const rows = d.holdings;
+  $('#rows').innerHTML = rows.length ? rows.map(h => {
+    const flag = h.weight !== null && h.weight > d.threshold;
+    return `<tr class="${flag ? 'flag' : ''}"><td><b>${esc(h.name)}</b>${h.symbol ? `<div class="small muted">${esc(h.symbol)}</div>` : ''}</td><td>${esc(h.category)}</td>
+      <td class="num">${num(h.quantity, 4)}</td><td class="num">${money(h.buy_price)}</td>
+      <td class="num">${h.price === null ? '<span class="badge red">missing</span>' : money(h.price)}<div><span class="badge ${src[h.price_source]}">${esc(h.price_source)}</span></div></td>
+      <td class="num">${money(h.cost)}</td><td class="num">${money(h.value)}</td>
+      <td class="num ${cls(h.pl)}">${money(h.pl)}</td><td class="num ${cls(h.ret)}">${pct(h.ret)}</td>
+      <td class="num">${h.weight === null ? '-' : h.weight.toFixed(1) + '%'}${flag ? ' <span class="badge">high</span>' : ''}</td>
+      <td><button class="btn ghost sm" onclick="edit(${h.id})">Edit</button> <button class="btn ghost sm" onclick="del(${h.id})">Delete</button></td></tr>`; }).join('')
+    : '<tr><td colspan="11" class="muted" style="padding:1.2rem">No holdings yet. Add one, import a CSV, or load a sample portfolio.</td></tr>';
+  const s = d.summary;
+  $('#foot').innerHTML = rows.length ? `<tr><th colspan="5">Total (priced holdings)</th><th class="num">${money(s.cost)}</th><th class="num">${money(s.value)}</th>
+    <th class="num ${cls(s.pl)}">${money(s.pl)}</th><th class="num ${cls(s.ret)}">${pct(s.ret)}</th><th class="num">100%</th><th></th></tr>` : '';
+  const a = d.alloc.by_category;
+  if (a.length) drawChart('catChart', { type: 'pie', data: { labels: a.map(x => x.category), datasets: [{ data: a.map(x => +x.value.toFixed(2)), backgroundColor: PALETTE }] },
+    options: { plugins: { title: { display: true, text: 'Share of current value by category' }, legend: { position: 'bottom' } } } });
+  else if (charts.catChart) { charts.catChart.destroy(); delete charts.catChart; }
+  $('#byHolding').innerHTML = d.alloc.by_holding.map(h => `<div style="margin-bottom:.55rem"><div class="small"><b>${esc(h.name)}</b> <span class="muted">${h.weight.toFixed(1)}% &middot; ${money(h.value)}</span></div>
+    <div class="bar"><i style="width:${Math.min(100, h.weight)}%;background:${h.weight > d.threshold ? 'var(--bad)' : 'var(--brand)'}"></i></div></div>`).join('') || '<span class="muted small">Nothing to show.</span>';
+  const cur = Object.fromEntries(a.map(x => [x.category, x.weight.toFixed(0)]));
+  if (!$('#targetInputs').children.length) $('#targetInputs').innerHTML = CATS.map(c => `<div><label>${c} %</label><input type="number" min="0" max="100" step="1" data-cat="${c}" value="${cur[c] || 0}"></div>`).join('');
+}
+
+function formHTML(h = {}) {
+  return `<h2>${h.id ? 'Edit holding' : 'Add holding'}</h2><form id="hform" novalidate>
+    <div class="field"><label>Asset name</label><input name="name" value="${esc(h.name || '')}" maxlength="80"><div class="err" data-err="name"></div></div>
+    <div class="row"><div class="field"><label>Category</label><select name="category">${CATS.map(c => `<option ${h.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select><div class="err" data-err="category"></div></div>
+      <div class="field"><label>Sample symbol (optional)${tip('Pick a symbol to use the simulated price history for this asset. Leave blank for a manually priced asset like a fixed deposit.')}</label>
+        <select name="symbol"><option value="">- none (manual) -</option>${Object.entries(CATALOG).map(([k, v]) => `<option value="${k}" ${h.symbol === k ? 'selected' : ''}>${k} - ${esc(v.name)}</option>`).join('')}</select><div class="err" data-err="symbol"></div></div></div>
+    <div class="row"><div class="field"><label>Units / quantity</label><input name="quantity" type="number" step="any" value="${h.quantity ?? ''}"><div class="err" data-err="quantity"></div></div>
+      <div class="field"><label>Purchase price per unit</label><input name="buy_price" type="number" step="any" value="${h.buy_price ?? ''}"><div class="err" data-err="buy_price"></div></div></div>
+    <div class="field"><label>Latest price per unit (optional if a sample symbol is chosen)</label><input name="latest_price" type="number" step="any" value="${h.latest_price ?? ''}"><div class="err" data-err="latest_price"></div></div>
+    <div class="row"><div class="auto"><button class="btn" type="submit">Save</button></div><div class="auto"><button class="btn ghost" type="button" id="cancelBtn">Cancel</button></div></div></form>`;
+}
+function openForm(h) {
+  const m = modal(formHTML(h)); const f = $('#hform', m);
+  $('#cancelBtn', m).onclick = () => m.remove();
+  f.addEventListener('submit', async e => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(f));
+    try {
+      await api(h && h.id ? `/api/holdings/${h.id}` : '/api/holdings', { method: h && h.id ? 'PUT' : 'POST', body });
+      m.remove(); toast('Holding saved', 'good'); load();
+    } catch (er) { setFieldErrors(f, er.fields); if (!er.fields) toast(er.message, 'bad'); }
+  });
+}
+window.edit = id => openForm(DATA.holdings.find(h => h.id === id));
+window.del = async id => { if (!confirm('Delete this holding?')) return; await api(`/api/holdings/${id}`, { method: 'DELETE' }); toast('Deleted'); load(); };
+$('#addBtn').onclick = () => openForm();
+$('#sampleBtn').onclick = () => {
+  const m = modal(`<h2>Load a sample portfolio</h2><p class="small muted">This replaces your current holdings, watchlist and reminders with simulated sample data.</p>
+    <select id="persona"><option value="conservative">Priya - Conservative saver</option><option value="moderate" selected>Rahul - Balanced investor</option><option value="aggressive">Aman - Growth seeker</option></select>
+    <div class="row mt"><div class="auto"><button class="btn" id="go">Load</button></div><div class="auto"><button class="btn ghost" id="no">Cancel</button></div></div>`);
+  $('#no', m).onclick = () => m.remove();
+  $('#go', m).onclick = async () => { await api('/api/holdings/load-sample', { method: 'POST', body: { persona: $('#persona', m).value } }); m.remove(); toast('Sample loaded', 'good'); load(); };
+};
+$('#importBtn').onclick = () => {
+  const m = modal(`<h2>Import holdings from CSV</h2>
+    <p class="small muted">Required columns: <b>name, category, quantity, buy_price</b>. Optional: symbol, latest_price. Bad rows are skipped and reported. <a href="/export/template.csv">Download template</a></p>
+    <input type="file" id="csv" accept=".csv"><div class="field mt"><label><input type="checkbox" id="replace" style="width:auto"> Replace my existing holdings</label></div>
+    <div id="imsg" class="small"></div><div class="row mt"><div class="auto"><button class="btn" id="up">Import</button></div><div class="auto"><button class="btn ghost" id="no">Close</button></div></div>`);
+  $('#no', m).onclick = () => m.remove();
+  $('#up', m).onclick = async () => {
+    const file = $('#csv', m).files[0]; if (!file) { $('#imsg', m).textContent = 'Choose a file first.'; return; }
+    const fd = new FormData(); fd.append('file', file); fd.append('mode', $('#replace', m).checked ? 'replace' : 'append');
+    try {
+      const r = await api('/api/holdings/import', { method: 'POST', body: fd });
+      $('#imsg', m).innerHTML = `<span class="pos">Imported ${r.imported} row(s).</span> ${r.skipped ? `Skipped ${r.skipped}:<ul>${r.details.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`; load();
+    } catch (er) { $('#imsg', m).innerHTML = `<span class="neg">${esc(er.message)}</span>${er.details ? `<ul>${er.details.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`; }
+  };
+};
+$('#cmpBtn').onclick = async () => {
+  const target = Object.fromEntries($$('#targetInputs input').map(i => [i.dataset.cat, i.value]));
+  try {
+    const r = await api('/api/allocation/compare', { method: 'POST', body: { target } });
+    $('#cmpMsg').innerHTML = `Hypothetical volatility rating: <b>${r.target_risk_exposure}/100</b> vs current <b>${DATA.alloc.risk_exposure}/100</b>`;
+    $('#cmpBox').classList.remove('hidden'); $('#cmpNote').classList.remove('hidden');
+    drawChart('cmpChart', { type: 'bar', data: { labels: r.rows.map(x => x.category), datasets: [
+      { label: 'Current %', data: r.rows.map(x => x.current), backgroundColor: PALETTE[0] }, { label: 'Hypothetical %', data: r.rows.map(x => x.target), backgroundColor: PALETTE[2] }] },
+      options: { plugins: { title: { display: true, text: 'Current vs hypothetical allocation (% of portfolio)' } }, scales: { y: { title: { display: true, text: '% of portfolio' }, beginAtZero: true } } } });
+    $('#cmpNote').textContent = 'Illustration only. Moving toward higher-volatility categories can raise both potential gains and potential losses; fees, taxes and timing are not modelled.';
+  } catch (e) { $('#cmpMsg').innerHTML = `<span class="neg">${esc(e.message)}</span>`; }
+};
+load().catch(e => toast(e.message, 'bad'));
+</script>
+{% endblock %}

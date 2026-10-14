@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Compare Investments{% endblock %}
+{% block content %}
+<h1>Compare Investments</h1>
+<div class="disclaimer"><b>All numbers here are SIMULATED sample data</b>, not real market data. Comparisons are sensitive to the dates chosen, data quality, fees, taxes and assumptions. Past performance does not predict future results.</div>
+<div class="tabs"><button class="on" data-tab="assets">Assets side by side</button><button data-tab="ports">Hypothetical portfolios</button></div>
+
+<div id="tab-assets">
+  <div class="card"><h2>Pick 2 to 6 assets</h2><div id="assetPick" class="row" style="gap:.4rem 1rem"></div>
+    <div class="row mt" style="align-items:center"><div class="auto"><div class="seg" id="aRange"><button data-v="3M">3M</button><button data-v="6M">6M</button><button data-v="1Y" class="on">1Y</button><button data-v="2Y">2Y</button></div></div>
+    <div class="auto"><button class="btn" id="aBtn">Compare</button></div><div class="small" id="aMsg"></div></div></div>
+  <div class="card hidden" id="aOut"><div class="chart-box"><canvas id="aChart"></canvas></div>
+    <div class="tablewrap mt"><table><thead><tr><th>Asset</th><th>Category</th>
+      <th class="num">Period return<span class="tip" tabindex="0" data-tip="(End - start) / start x 100 over the selected period.">?</span></th>
+      <th class="num">Volatility (yearly)<span class="tip" tabindex="0" data-tip="Standard deviation of daily returns x square root of 252. Higher = bigger swings.">?</span></th>
+      <th class="num">Max drawdown<span class="tip" tabindex="0" data-tip="Largest fall from a previous peak to a later low within the period.">?</span></th>
+      <th class="num">Fee % / yr<span class="tip" tabindex="0" data-tip="Illustrative expense ratio stored with the sample data. Not real.">?</span></th><th class="num">Min. invest</th></tr></thead><tbody id="aRows"></tbody></table></div>
+    <div class="note" id="aNote"></div></div>
+</div>
+
+<div id="tab-ports" class="hidden">
+  <div class="card"><h2>Build hypothetical portfolios</h2>
+    <p class="small muted">Enter percentage weights for each asset (each column must add up to 100%). The chart updates automatically when every column totals 100%.</p>
+    <div class="row" style="align-items:center"><div class="auto"><button class="btn ghost sm" id="loadCur">Load my current holdings into A</button></div>
+      <div class="auto"><select id="preset" style="min-width:230px"><option value="">Load a preset into B...</option><option value="cons">Conservative mix</option><option value="bal">Balanced mix</option><option value="grow">Growth mix</option></select></div>
+      <div class="auto"><div class="seg" id="pRange"><button data-v="6M">6M</button><button data-v="1Y" class="on">1Y</button><button data-v="2Y">2Y</button></div></div></div>
+    <div class="tablewrap mt"><table id="wtable"></table></div><div class="small mt" id="pMsg"></div></div>
+  <div class="card hidden" id="pOut"><div class="chart-box"><canvas id="pChart"></canvas></div>
+    <div class="tablewrap mt"><table><thead><tr><th>Portfolio</th><th class="num">Period return</th><th class="num">Volatility (yearly)</th><th class="num">Max drawdown</th>
+      <th class="num">Weighted fee % / yr</th><th class="num">Volatility rating<span class="tip" tabindex="0" data-tip="Illustrative 0-100 rating: sum of weight x category rating (Equity 1.0, Mutual Fund 0.7, Gold 0.5, Debt 0.25, Cash 0).">?</span></th></tr></thead><tbody id="pRows"></tbody></table></div>
+    <div class="note" id="pNote"></div>
+    <div class="row mt"><div><input id="scName" placeholder="Scenario name, e.g. 'Safer mix test'" maxlength="60"></div><div class="auto"><button class="btn" id="saveSc">Save scenario</button></div></div></div>
+  <div class="card"><h2>Saved scenarios</h2><div id="scList" class="small muted">None yet.</div></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let ASSETS = [], range = '1Y', pRange = '1Y', last = null;
+const PRESETS = { cons: { 'DEBT-GILT': 35, 'DEBT-CORP': 25, 'LIQUID-FUND': 15, 'GOLD-ETF': 10, 'MF-INDEX': 15 },
+  bal: { 'MF-INDEX': 30, 'EQ-LARGE': 15, 'MF-FLEXI': 15, 'DEBT-CORP': 20, 'GOLD-ETF': 10, 'DEBT-GILT': 10 },
+  grow: { 'EQ-LARGE': 20, 'EQ-MID': 15, 'EQ-IT': 15, 'MF-FLEXI': 25, 'MF-INDEX': 15, 'GOLD-ETF': 10 } };
+const COLS = ['A', 'B', 'C'];
+
+$$('.tabs button').forEach(b => b.onclick = () => { $$('.tabs button').forEach(x => x.classList.remove('on')); b.classList.add('on');
+  $('#tab-assets').classList.toggle('hidden', b.dataset.tab !== 'assets'); $('#tab-ports').classList.toggle('hidden', b.dataset.tab !== 'ports'); });
+
+function buildTable() {
+  $('#wtable').innerHTML = `<thead><tr><th>Asset</th>${COLS.map(c => `<th class="num">Portfolio ${c} %</th>`).join('')}</tr><tr><th>Name (optional)</th>${COLS.map(c => `<th><input data-name="${c}" value="Portfolio ${c}" style="font-size:.8rem"></th>`).join('')}</tr></thead>
+    <tbody>${ASSETS.map(a => `<tr><td>${esc(a.symbol)} <span class="muted small">${esc(a.category)}</span></td>${COLS.map(c => `<td><input type="number" min="0" max="100" step="1" data-col="${c}" data-sym="${a.symbol}" value="0" style="width:80px;text-align:right"></td>`).join('')}</tr>`).join('')}</tbody>
+    <tfoot><tr><th>Total</th>${COLS.map(c => `<th class="num" id="tot${c}">0%</th>`).join('')}</tr></tfoot>`;
+  $$('#wtable input[data-col]').forEach(i => i.addEventListener('input', () => { totals(); debounceRun(); }));
+}
+function weights(c) { const w = {}; $$(`#wtable input[data-col="${c}"]`).forEach(i => { const v = parseFloat(i.value); if (v > 0) w[i.dataset.sym] = v; }); return w; }
+function totals() { COLS.forEach(c => { const t = Object.values(weights(c)).reduce((a, b) => a + b, 0); const el = $('#tot' + c); el.textContent = t.toFixed(1) + '%'; el.className = 'num ' + (Math.abs(t - 100) <= .5 ? 'pos' : (t === 0 ? '' : 'neg')); }); }
+function setWeights(c, w) { $$(`#wtable input[data-col="${c}"]`).forEach(i => (i.value = w[i.dataset.sym] || 0)); totals(); }
+let timer; const debounceRun = () => { clearTimeout(timer); timer = setTimeout(runPorts, 450); };
+
+async function runPorts() {
+  const allocs = COLS.map(c => ({ name: $(`[data-name="${c}"]`).value || 'Portfolio ' + c, weights: weights(c) })).filter(a => Object.keys(a.weights).length);
+  if (!allocs.length) { $('#pMsg').textContent = 'Enter weights for at least Portfolio A.'; return; }
+  const bad = COLS.filter(c => { const t = Object.values(weights(c)).reduce((a, b) => a + b, 0); return t > 0 && Math.abs(t - 100) > .5; });
+  if (bad.length) { $('#pMsg').innerHTML = `<span class="neg">Portfolio ${bad.join(', ')} must add up to 100%.</span>`; return; }
+  try {
+    const r = await api('/api/compare/allocations', { method: 'POST', body: { allocations: allocs, range: pRange, freq: 'W' } });
+    last = { allocations: allocs, range: pRange }; $('#pMsg').textContent = ''; $('#pOut').classList.remove('hidden');
+    drawChart('pChart', { type: 'line', data: { labels: r.labels, datasets: r.results.map((x, i) => ({ label: x.name, data: x.series, borderColor: PALETTE[i], tension: .15 })) },
+      options: lineOpts('Hypothetical portfolios (start = 100, buy-and-hold) - ' + r.data_label, 'Index value') });
+    $('#pRows').innerHTML = r.results.map(x => `<tr><td><b>${esc(x.name)}</b></td><td class="num ${cls(x.period_return)}">${pct(x.period_return)}</td><td class="num">${x.volatility === null ? '-' : x.volatility.toFixed(1) + '%'}</td>
+      <td class="num neg">${x.max_drawdown === null ? '-' : x.max_drawdown.toFixed(1) + '%'}</td><td class="num">${x.weighted_expense.toFixed(2)}</td><td class="num">${x.volatility_rating}</td></tr>`).join('');
+    $('#pNote').textContent = r.assumption;
+  } catch (e) { $('#pMsg').innerHTML = `<span class="neg">${esc(e.message)}</span>`; }
+}
+async function loadScenarios() {
+  const d = await api('/api/scenarios'); const list = d.scenarios.filter(s => s.kind === 'allocation');
+  $('#scList').innerHTML = list.length ? list.map(s => `<div class="row" style="align-items:center;margin-bottom:.4rem"><div><b>${esc(s.name)}</b> <span class="muted">${esc(s.created_at)}</span></div>
+    <div class="auto"><button class="btn ghost sm" onclick="loadSc(${s.id})">Load</button> <button class="btn ghost sm" onclick="delSc(${s.id})">Delete</button></div></div>`).join('') : 'None yet.';
+  window._sc = list;
+}
+window.loadSc = id => { const s = window._sc.find(x => x.id === id); COLS.forEach((c, i) => { const a = s.data.allocations[i]; setWeights(c, a ? a.weights : {}); if (a) $(`[data-name="${c}"]`).value = a.name; }); runPorts(); };
+window.delSc = async id => { await api('/api/scenarios/' + id, { method: 'DELETE' }); loadScenarios(); };
+
+async function init() {
+  const d = await api('/api/catalog'); ASSETS = d.assets;
+  $('#assetPick').innerHTML = ASSETS.map((a, i) => `<label style="font-weight:400;min-width:260px"><input type="checkbox" style="width:auto" value="${a.symbol}" ${i < 3 ? 'checked' : ''}> <b>${esc(a.symbol)}</b> <span class="muted small">${esc(a.name)}</span></label>`).join('');
+  buildTable(); loadScenarios();
+  setWeights('B', PRESETS.bal);
+}
+segControl($('#aRange'), v => (range = v)); segControl($('#pRange'), v => { pRange = v; runPorts(); });
+$('#aBtn').onclick = async () => {
+  const symbols = $$('#assetPick input:checked').map(i => i.value);
+  try {
+    const r = await api('/api/compare/assets', { method: 'POST', body: { symbols, range, freq: 'W' } });
+    $('#aMsg').textContent = ''; $('#aOut').classList.remove('hidden');
+    drawChart('aChart', { type: 'line', data: { labels: r.labels, datasets: Object.entries(r.series).map(([k, v], i) => ({ label: k + (k === 'NIFTY-SAMPLE' ? ' (benchmark)' : ''), data: v, borderColor: PALETTE[i % 8], borderDash: k === 'NIFTY-SAMPLE' ? [5, 4] : [], tension: .15 })) },
+      options: lineOpts('Growth of 100 invested at the start - ' + r.data_label, 'Index value') });
+    $('#aRows').innerHTML = r.rows.map(x => `<tr><td><b>${esc(x.symbol)}</b><div class="small muted">${esc(x.name)}</div></td><td>${esc(x.category)}</td><td class="num ${cls(x.period_return)}">${pct(x.period_return)}</td>
+      <td class="num">${x.volatility === null ? '-' : x.volatility.toFixed(1) + '%'}</td><td class="num neg">${x.max_drawdown === null ? '-' : x.max_drawdown.toFixed(1) + '%'}</td>
+      <td class="num">${x.expense === null ? 'n/a' : x.expense.toFixed(2)}</td><td class="num">${x.min_invest === null ? 'n/a' : money(x.min_invest)}</td></tr>`).join('');
+    $('#aNote').textContent = 'Simulated data. Fees, taxes, dates and data quality all change real-world comparisons. Fee and minimum-investment values are illustrative.';
+  } catch (e) { $('#aMsg').innerHTML = `<span class="neg">${esc(e.message)}</span>`; }
+};
+$('#loadCur').onclick = async () => { const r = await api('/api/current-weights'); setWeights('A', r.weights); $('#pMsg').textContent = r.excluded ? `${r.excluded} holding(s) without a sample symbol were left out.` : ''; runPorts(); };
+$('#preset').onchange = e => { if (e.target.value) { setWeights('B', PRESETS[e.target.value]); e.target.value = ''; runPorts(); } };
+$('#saveSc').onclick = async () => { if (!last) return; try { await api('/api/scenarios', { method: 'POST', body: { name: $('#scName').value, kind: 'allocation', data: last } }); toast('Scenario saved', 'good'); $('#scName').value = ''; loadScenarios(); } catch (e) { toast(e.message, 'bad'); } };
+init().catch(e => toast(e.message, 'bad'));
+</script>
+{% endblock %}

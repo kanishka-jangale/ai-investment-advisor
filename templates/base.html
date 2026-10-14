@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf" content="{{ csrf_token() }}">
+<title>{% block title %}AI Investment Advisor{% endblock %} | AI Investment Advisor Dashboard</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body data-currency="{{ currency }}">
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><span>AI</span> Investment Advisor</div>
+    <nav>
+      {% set items = [('dashboard','Home'),('portfolio','My Portfolio'),('risk','Risk Profile'),('insights','AI Insights'),
+                      ('compare','Compare Investments'),('goal','Goal Planner'),('watchlist','Watchlist'),('report','Reports'),('settings','Settings / Help')] %}
+      {% for ep, label in items %}<a href="{{ url_for(ep) }}" class="{{ 'active' if active == ep else '' }}">{{ label }}</a>{% endfor %}
+    </nav>
+    <div class="foot">Educational prototype.<br>Not financial advice.</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="who">
+        <span class="badge" title="All prices are simulated by a script. No live market feed is connected.">{{ data_label }}</span>
+        <span class="badge gray">{{ 'Demo session' if user.is_demo else 'Signed in: ' ~ user.username }}</span>
+      </div>
+      <div class="who">
+        <span class="small muted">{{ (prof.display_name or '') }}</span>
+        <div class="bell">
+          <button class="btn ghost sm" id="bell-btn" type="button" aria-label="Reminders">&#128276;<span class="count hidden" id="bell-count">0</span></button>
+          <div class="panel hidden" id="bell-panel"><b class="small">Your reminders</b><div id="bell-list" class="mt"></div></div>
+        </div>
+        <form method="post" action="{{ url_for('logout') }}" style="margin:0"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn ghost sm" type="submit">Log out</button></form>
+      </div>
+    </div>
+    {% block content %}{% endblock %}
+    <p class="small muted mt">AI Investment Advisor Dashboard | College mini project. Educational information only. Past performance does not predict future results. Rule-based insights are only as good as their inputs and rules.</p>
+  </main>
+</div>
+<div id="toasts"></div>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,1 @@
+Sample prices are generated automatically on first run (data/price_history.csv). Delete that file to regenerate it, or replace it with your own CSV: first column 'date', one column per symbol. All generated prices are SIMULATED.

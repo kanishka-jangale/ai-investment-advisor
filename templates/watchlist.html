@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Watchlist{% endblock %}
+{% block content %}
+<h1>Watchlist &amp; Reminders</h1>
+<div class="disclaimer"><b>Demo data:</b> no live market feed is connected. Prices below come from a simulated sample dataset and are never real-time quotes.</div>
+<div class="card">
+  <div class="row" style="align-items:center"><h2 style="margin:0">Watched assets</h2>
+    <div class="auto"><select id="addSym"></select></div><div class="auto"><button class="btn" id="addBtn">Add</button></div></div>
+  <div class="tablewrap mt"><table><thead><tr><th>Asset</th><th>Category</th><th class="num">Sample price</th><th class="num">1D</th><th class="num">1M</th><th class="num">1Y</th><th>Last updated</th><th>Source</th><th></th></tr></thead>
+    <tbody id="wrows"><tr><td colspan="9" class="spinner">Loading...</td></tr></tbody></table></div>
+</div>
+<div class="card hidden" id="detail"><div class="row" style="align-items:center"><h2 style="margin:0" id="dTitle"></h2>
+  <div class="auto"><div class="seg" id="dRange"><button data-v="3M">3M</button><button data-v="6M">6M</button><button data-v="1Y" class="on">1Y</button><button data-v="2Y">2Y</button></div></div>
+  <div class="auto"><div class="seg" id="dFreq"><button data-v="D">Daily</button><button data-v="W" class="on">Weekly</button><button data-v="M">Monthly</button></div></div></div>
+  <div class="chart-box mt"><canvas id="dChart"></canvas></div>
+  <details class="mt"><summary class="small" style="cursor:pointer;color:var(--brand)">Show table</summary><div class="tablewrap" style="max-height:240px;overflow:auto"><table><thead><tr><th>Date</th><th class="num">Price</th><th class="num">% change</th></tr></thead><tbody id="dRows"></tbody></table></div></details>
+  <div class="note">Simulated sample data. Past performance does not predict future results.</div></div>
+<div class="card"><h2>Reminders (in-app only)</h2>
+  <p class="small muted">Set your own thresholds. A reminder is a prompt to look at your plan, not a trading instruction. Triggered reminders show in the bell icon at the top.</p>
+  <form id="aform" class="row" novalidate>
+    <div><label>Type</label><select name="kind" id="kind"></select></div>
+    <div id="symBox" class="hidden"><label>Asset</label><select name="symbol" id="symSel"></select></div>
+    <div id="catBox" class="hidden"><label>Category</label><select name="category" id="catSel"></select></div>
+    <div><label>Threshold</label><input name="threshold" type="number" step="any" min="0"></div>
+    <div class="auto"><button class="btn" type="submit">Add reminder</button></div></form>
+  <div id="amsg" class="small neg mt"></div>
+  <div id="alist" class="mt"></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+let sym = null, dRange = '1Y', dFreq = 'W', ASSETS = [];
+async function loadWatch() {
+  const d = await api('/api/watchlist');
+  $('#wrows').innerHTML = d.items.length ? d.items.map(i => i.unavailable ? `<tr><td>${esc(i.symbol)}</td><td colspan="7" class="muted">Data unavailable right now</td><td></td></tr>` :
+    `<tr><td><a href="#" onclick="show('${i.symbol}');return false"><b>${esc(i.symbol)}</b></a><div class="small muted">${esc(i.name)}</div></td><td>${esc(i.category)}</td><td class="num">${money(i.price)}</td>
+    <td class="num ${cls(i.change_1d)}">${pct(i.change_1d)}</td><td class="num ${cls(i.change_1m)}">${pct(i.change_1m)}</td><td class="num ${cls(i.change_1y)}">${pct(i.change_1y)}</td>
+    <td>${esc(i.last_updated)}</td><td><span class="badge">${esc(i.source)}</span></td><td><button class="btn ghost sm" onclick="rm('${i.symbol}')">Remove</button></td></tr>`).join('')
+    : '<tr><td colspan="9" class="muted" style="padding:1rem">Nothing watched yet. Add an asset above.</td></tr>';
+}
+window.rm = async s => { await api('/api/watchlist/' + s, { method: 'DELETE' }); if (sym === s) { $('#detail').classList.add('hidden'); sym = null; } loadWatch(); };
+window.show = async s => {
+  if (s) sym = s; if (!sym) return;
+  try {
+    const h = await api(`/api/history/${sym}?range=${dRange}&freq=${dFreq}`);
+    $('#detail').classList.remove('hidden'); $('#dTitle').textContent = sym + ' - price history (simulated)';
+    drawChart('dChart', { type: 'line', data: { labels: h.labels, datasets: [{ label: sym + ' sample price', data: h.values, borderColor: PALETTE[0], tension: .15 }] }, options: lineOpts('Sample price over time', 'Price (' + CUR + ')') });
+    $('#dRows').innerHTML = h.table.map(r => `<tr><td>${r.date}</td><td class="num">${money(r.value)}</td><td class="num ${cls(r.change)}">${pct(r.change)}</td></tr>`).join('');
+  } catch (e) { toast(e.message, 'bad'); }
+};
+async function loadAlerts() {
+  const d = await api('/api/alerts');
+  $('#alist').innerHTML = d.alerts.length ? d.alerts.map(a => `<div class="insight ${a.triggered ? 'medium' : 'info'}"><div class="row" style="align-items:center"><div><b>${esc(a.label)}</b> ${esc(a.symbol || a.category || '')} ${a.threshold}
+    <span class="badge ${a.triggered ? '' : 'gray'}">${a.triggered ? 'triggered' : 'not triggered'}</span><div class="small">${esc(a.message)}</div><div class="small muted">${esc(a.basis)}</div></div>
+    <div class="auto"><button class="btn ghost sm" onclick="rmA(${a.id})">Delete</button></div></div></div>`).join('') : '<span class="small muted">No reminders yet.</span>';
+  loadBell();
+}
+window.rmA = async id => { await api('/api/alerts/' + id, { method: 'DELETE' }); loadAlerts(); };
+function kindUI() { const k = $('#kind').value; $('#symBox').classList.toggle('hidden', !k.startsWith('price')); $('#catBox').classList.toggle('hidden', k !== 'weight_above'); }
+async function init() {
+  const [c, a] = await Promise.all([api('/api/catalog'), api('/api/alerts')]); ASSETS = c.assets;
+  const opt = ASSETS.map(x => `<option value="${x.symbol}">${x.symbol} - ${esc(x.name)}</option>`).join('');
+  $('#addSym').innerHTML = opt; $('#symSel').innerHTML = opt;
+  $('#kind').innerHTML = Object.entries(a.kinds).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
+  $('#catSel').innerHTML = a.categories.map(x => `<option>${x}</option>`).join(''); kindUI(); $('#kind').onchange = kindUI;
+  loadWatch(); loadAlerts();
+}
+$('#addBtn').onclick = async () => { try { await api('/api/watchlist', { method: 'POST', body: { symbol: $('#addSym').value } }); loadWatch(); } catch (e) { toast(e.message, 'bad'); } };
+$('#aform').addEventListener('submit', async e => { e.preventDefault(); const body = Object.fromEntries(new FormData(e.target));
+  try { await api('/api/alerts', { method: 'POST', body }); $('#amsg').textContent = ''; e.target.threshold.value = ''; loadAlerts(); } catch (er) { $('#amsg').textContent = er.message; } });
+segControl($('#dRange'), v => { dRange = v; show(); }); segControl($('#dFreq'), v => { dFreq = v; show(); });
+init().catch(e => toast(e.message, 'bad'));
+</script>
+{% endblock %}

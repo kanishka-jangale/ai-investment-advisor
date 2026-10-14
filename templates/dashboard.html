@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+<h1>Overview</h1>
+<p class="muted small" id="meta">Loading...</p>
+<div class="grid g4" id="cards"><div class="card spinner">Loading...</div></div>
+<div class="grid g21">
+  <div class="card">
+    <div class="row" style="align-items:center">
+      <h2 style="margin:0">Portfolio performance</h2>
+      <div class="auto"><div class="seg" id="range"><button data-v="1M">1M</button><button data-v="3M">3M</button><button data-v="6M">6M</button><button data-v="1Y" class="on">1Y</button><button data-v="2Y">2Y</button><button data-v="ALL">All</button></div></div>
+      <div class="auto"><div class="seg" id="freq"><button data-v="D" class="on">Daily</button><button data-v="W">Weekly</button><button data-v="M">Monthly</button></div></div>
+    </div>
+    <div class="chart-box mt"><canvas id="perfChart"></canvas></div>
+    <div id="perfNote" class="note"></div>
+    <details><summary class="small" style="cursor:pointer;color:var(--brand)">Show table (date, value, % change)</summary>
+      <div class="tablewrap" style="max-height:260px;overflow:auto"><table><thead><tr><th>Date</th><th class="num">Value</th><th class="num">% change</th></tr></thead><tbody id="perfTable"></tbody></table></div>
+    </details>
+  </div>
+  <div class="card">
+    <h2>Asset allocation</h2>
+    <div class="chart-box sm"><canvas id="allocChart"></canvas></div>
+    <div id="allocNote" class="note"></div>
+  </div>
+</div>
+<div class="grid g2">
+  <div class="card"><h2>Key insights</h2><div id="insights"></div><a href="{{ url_for('insights') }}" class="small">See all insights &rarr;</a></div>
+  <div class="card"><h2>Recent updates</h2><div id="updates" class="small"></div>
+    <h3>Saved scenarios</h3><div id="scenarios" class="small muted">None yet. Save one from Compare Investments.</div></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let range = '1Y', freq = 'D';
+async function load() {
+  const d = await api(`/api/summary?range=${range}&freq=${freq}`);
+  const s = d.summary;
+  $('#meta').innerHTML = `Currency: <b>${CUR}</b> (display only, no conversion) &middot; Data: <b>${esc(d.meta.portfolio_source)}</b> &middot; Price sources: ${d.meta.price_sources.map(esc).join(', ') || 'none'} &middot; Sample prices last updated <b>${esc(d.status.last_updated)}</b> (simulated, not live)`;
+  $('#cards').innerHTML = [
+    ['Total portfolio value', money(s.value), `${s.priced} of ${s.count} holdings priced`, '', 'Current value = quantity x latest price, summed over holdings that have a price.'],
+    ['Invested amount (cost basis)', money(s.cost), 'quantity x purchase price', '', 'Cost basis = quantity x purchase price. Fees and taxes are not included.'],
+    ['Unrealized profit / loss', money(s.pl), 'before fees and taxes', cls(s.pl), 'Unrealized P/L = current value - cost basis. It is only a paper gain or loss until you sell.'],
+    ['Overall return', s.ret === null ? '-' : pct(s.ret), 'P/L / cost basis', cls(s.ret), 'Return % = (current value - cost basis) / cost basis x 100.']
+  ].map(c => `<div class="card stat"><div class="label">${c[0]}${tip(c[4])}</div><div class="value ${c[3]}">${c[1]}</div><div class="sub muted">${c[2]}</div></div>`).join('');
+
+  const a = d.alloc.by_category;
+  if (a.length) {
+    drawChart('allocChart', { type: 'doughnut', data: { labels: a.map(x => x.category), datasets: [{ data: a.map(x => +x.value.toFixed(2)), backgroundColor: PALETTE }] },
+      options: { plugins: { title: { display: true, text: 'Allocation by category (share of current value)' }, legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: c => `${c.label}: ${money(c.raw)} (${a[c.dataIndex].weight.toFixed(1)}%)` } } } } });
+    $('#allocNote').textContent = `Portfolio volatility rating: ${d.alloc.risk_exposure}/100 (illustrative: Equity 1.0, Mutual Fund 0.7, Gold 0.5, Debt 0.25, Cash 0). Diversification can reduce concentration risk but cannot eliminate investment risk.`;
+  } else { $('#allocNote').textContent = 'Add holdings to see the allocation chart.'; if (charts.allocChart) { charts.allocChart.destroy(); delete charts.allocChart; } }
+
+  const p = d.performance;
+  if (p.available) {
+    drawChart('perfChart', { type: 'line', data: { labels: p.labels, datasets: [
+      { label: 'My portfolio (index, start = 100)', data: p.portfolio_index, borderColor: PALETTE[0], tension: .15 },
+      { label: p.benchmark_name + ' (index, start = 100)', data: p.benchmark_index, borderColor: PALETTE[2], borderDash: [5, 4], tension: .15 }] },
+      options: lineOpts('Portfolio vs benchmark (rebased to 100)', 'Index value') });
+    $('#perfNote').innerHTML = `Change over the period: <b class="${cls(p.abs_change)}">${money(p.abs_change)} (${pct(p.pct_change)})</b>. ${esc(p.assumption)} ${p.excluded ? p.excluded + ' holding(s) without sample history are excluded from this chart.' : ''} <b>Past performance does not predict future results.</b>`;
+    $('#perfTable').innerHTML = p.table.map(r => `<tr><td>${r.date}</td><td class="num">${money(r.value)}</td><td class="num ${cls(r.change)}">${pct(r.change)}</td></tr>`).join('');
+  } else {
+    if (charts.perfChart) { charts.perfChart.destroy(); delete charts.perfChart; }
+    $('#perfNote').textContent = p.reason; $('#perfTable').innerHTML = '';
+  }
+  $('#insights').innerHTML = d.insights.slice(0, 3).map(insightHTML).join('');
+  $('#updates').innerHTML = `<ul style="padding-left:1.1rem;margin:.2rem 0"><li>Risk profile: ${d.risk ? `<b>${esc(d.risk.category)}</b> (score ${d.risk.score})` : 'not completed yet'}</li>
+    <li>Holdings: ${s.count} (${s.missing} without a price)</li><li>Reminders triggered: ${d.meta.alerts}</li>
+    <li>Sample price data: ${d.status.rows} rows, ${d.status.symbols} symbols, ${esc(d.status.first_date)} to ${esc(d.status.last_updated)}</li></ul>`;
+  if (d.scenarios.length) $('#scenarios').innerHTML = d.scenarios.map(x => `<div>&bull; ${esc(x.name)} <span class="muted">(${esc(x.kind)})</span></div>`).join('');
+}
+segControl($('#range'), v => { range = v; load(); });
+segControl($('#freq'), v => { freq = v; load(); });
+load().catch(e => toast(e.message, 'bad'));
+</script>
+{% endblock %}

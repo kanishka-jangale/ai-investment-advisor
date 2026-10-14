@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Risk Profile{% endblock %}
+{% block content %}
+<h1>Risk Profile</h1>
+<div class="disclaimer">This short questionnaire gives an <b>educational estimate</b> only. It cannot fully measure your financial suitability or replace advice from a qualified professional.</div>
+<div class="grid g2">
+  <div>
+    <div class="card"><h2>1. Your profile</h2>
+      <form id="pform" novalidate>
+        <div class="field"><label>Display name (optional)</label><input name="display_name" maxlength="40"></div>
+        <div class="row"><div class="field"><label>Investing experience</label><select name="experience" id="experience"></select><div class="err" data-err="experience"></div></div>
+          <div class="field"><label>Time horizon (years)<span class="tip" tabindex="0" data-tip="How long until you need most of this money. Longer horizons give more time to recover from market falls.">?</span></label><input name="horizon_years" type="number" step="0.5" min="0.1" max="60"><div class="err" data-err="horizon_years"></div></div></div>
+        <div class="row"><div class="field"><label>Broad financial goal</label><select name="goal" id="goal"></select></div>
+          <div class="field"><label>Preferred level of risk (your own view)</label><select name="preferred_risk" id="preferred"></select></div></div>
+        <p class="small muted">Only what is needed is collected. Never enter passwords, bank details or ID numbers.</p>
+      </form></div>
+    <div class="card"><h2>2. Questionnaire</h2><form id="qform" novalidate><div id="questions"></div>
+      <button class="btn" type="button" id="saveBtn">Calculate my risk profile</button> <span class="small muted">You can revise answers any time and see how the result changes.</span></form></div>
+  </div>
+  <div>
+    <div class="card" id="result"><h2>Your result</h2><p class="muted">Complete the questionnaire to see your educational risk category.</p></div>
+    <div class="card"><h2>Risk concepts</h2><div class="small">
+      <p><b>Volatility</b> - how much a price swings up and down. Higher volatility means a wider range of outcomes, in both directions.</p>
+      <p><b>Concentration</b> - having a large share in one asset or sector, so one bad outcome hurts more.</p>
+      <p><b>Liquidity</b> - how quickly you can turn an asset into cash without a big price drop.</p>
+      <p><b>Potential loss</b> - the amount you could lose in a bad period. Ask yourself whether you could wait out a loss of that size.</p></div></div>
+    <div class="card"><h2>Optional ML experiment</h2>
+      <p class="small muted">A small logistic-regression model (scikit-learn) trained on synthetic data labelled by the same rules. It demonstrates an ML workflow with an evaluation metric; it is <b>not</b> more accurate than the rules about real people.</p>
+      <button class="btn ghost sm" id="mlBtn">Run ML check</button><div id="ml" class="small mt"></div></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let P = null, QS = [];
+function opts(sel, list, val, blank) { sel.innerHTML = (blank ? `<option value="">${blank}</option>` : '') + list.map(x => `<option ${x === val ? 'selected' : ''}>${esc(x)}</option>`).join(''); }
+function renderResult(r, prev) {
+  if (!r) return;
+  const change = prev && prev.cat && prev.cat !== r.category ? `<div class="note">Changed from <b>${esc(prev.cat)}</b> (${prev.score}) to <b>${esc(r.category)}</b> (${r.score}) after your revision.</div>` : '';
+  $('#result').innerHTML = `<h2>Your result</h2>
+    <div style="font-size:1.6rem;font-weight:700">${esc(r.category)} <span class="muted" style="font-size:1rem">score ${r.score}/100</span></div>
+    <div class="meter mt" title="0 = lowest, 100 = highest"><i style="width:${r.score}%"></i></div>
+    <div class="small muted">${esc(r.bands)}</div>${change}
+    <div class="grid g2 mt"><div class="small"><b>Ability to take losses:</b> ${r.ability}/100${tip('Based on horizon, income stability, emergency savings and obligations.')}</div>
+      <div class="small"><b>Willingness to take losses:</b> ${r.willingness}/100${tip('Based on experience, reaction to a fall, acceptable loss and preference.')}</div></div>
+    <h3>Factors that shaped the result</h3><div class="tablewrap"><table><thead><tr><th>Factor</th><th class="num">Points (1-5)</th><th class="num">Adds to score</th></tr></thead><tbody>
+    ${r.factors.map(f => `<tr><td>${esc(f.label)}</td><td class="num">${f.points}</td><td class="num">${f.contribution}</td></tr>`).join('')}</tbody></table></div>
+    <div class="note">Score = average of the 8 factors, each scaled from 0 to 100. ${r.notes.map(esc).join(' ')}</div>`;
+}
+async function load() {
+  const d = await api('/api/profile'); P = d.profile; QS = d.questions;
+  const f = $('#pform');
+  f.display_name.value = P.display_name || ''; f.horizon_years.value = P.horizon_years ?? '';
+  opts(f.experience, d.experience, P.experience, '- choose -'); opts(f.goal, d.goals, P.goal, '- choose -'); opts(f.preferred_risk, d.preferred, P.preferred_risk, '- not sure -');
+  $('#questions').innerHTML = QS.map((q, qi) => `<div class="field"><label>${qi + 1}. ${esc(q.text)}</label>
+    ${q.options.map((o, i) => `<label style="font-weight:400"><input type="radio" name="${q.id}" value="${i}" style="width:auto" ${P.answers[q.id] === i ? 'checked' : ''}> ${esc(o)}</label>`).join('')}
+    <div class="err" data-err="${q.id}"></div></div>`).join('');
+  renderResult(d.risk);
+}
+$('#saveBtn').onclick = async () => {
+  const f = $('#pform'), q = $('#qform');
+  const answers = {}; QS.forEach(x => { const c = q.querySelector(`input[name="${x.id}"]:checked`); if (c) answers[x.id] = +c.value; });
+  const body = { display_name: f.display_name.value, experience: f.experience.value, horizon_years: f.horizon_years.value, goal: f.goal.value, preferred_risk: f.preferred_risk.value, answers };
+  const prev = P && P.risk_category ? { cat: P.risk_category, score: P.risk_score } : null;
+  try {
+    const r = await api('/api/profile', { method: 'POST', body });
+    setFieldErrors(f, {}); setFieldErrors(q, {}); renderResult(r.risk, prev); P.risk_category = r.risk.category; P.risk_score = r.risk.score;
+    toast('Risk profile updated', 'good');
+  } catch (e) { setFieldErrors(f, e.fields); setFieldErrors(q, e.fields); toast(e.message, 'bad'); }
+};
+$('#mlBtn').onclick = async () => {
+  try {
+    const m = await api('/api/ml/risk');
+    $('#ml').innerHTML = `<div>Model says: <b>${esc(m.prediction)}</b> (rules say <b>${esc(m.rule_category)}</b>). Probabilities: ${Object.entries(m.probabilities).map(([k, v]) => `${k} ${v}%`).join(', ')}</div>
+      <div class="mt">Held-out accuracy on synthetic data: <b>${m.accuracy}%</b> (train ${m.train_size}, test ${m.test_size})</div>
+      <div class="tablewrap"><table><thead><tr><th>Actual \\ Predicted</th>${m.labels.map(l => `<th class="num">${l}</th>`).join('')}</tr></thead><tbody>
+      ${m.confusion.map((row, i) => `<tr><td>${m.labels[i]}</td>${row.map(v => `<td class="num">${v}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <div class="note">${esc(m.caveat)}</div>`;
+  } catch (e) { $('#ml').innerHTML = `<span class="neg">${esc(e.message)}</span>`; }
+};
+load().catch(e => toast(e.message, 'bad'));
+</script>
+{% endblock %}
